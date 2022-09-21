@@ -5,10 +5,7 @@ from itertools import chain, combinations
 
 def alpha(log):
     wf_net = WorkflowNet(log)
-    s = set([1,2,3])
-    print([print (a) for a in wf_net._get_all_nonempty_subsets(s)])
     
-
 class WorkflowNet():
     def __init__(self, log):
         self._log = log
@@ -24,6 +21,22 @@ class WorkflowNet():
             self.T_O.union(Transition.from_event(tasks[-1]))
             
     def init_places(self):
+        if len(self.T_W) <= 0:
+            return
+        
+        T_W_subsets = self._get_all_nonempty_subsets(self.T_W)
+        A, B = T_W_subsets
+        
+    def direct_succesions(self):
+        pass
+    
+    def causality(self):
+        pass
+    
+    def paralell(self):
+        pass
+    
+    def choice(self):
         pass
             
     def build_petrni_net(self):
