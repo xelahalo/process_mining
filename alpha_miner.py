@@ -5,56 +5,176 @@ from itertools import chain, combinations
 
 def alpha(log):
     wf_net = WorkflowNet(log)
+    wf_net.omit_duplicate_traces()
+    wf_net.init_transition_sets()
+    wf_net.get_ordering_relations()
+    wf_net.init_places()
+    wf_net.init_flow_relations()
+    wf_net.build_petri_net()
     
+    return wf_net.get_petri_net()
+
 class WorkflowNet():
     def __init__(self, log):
         self._log = log
         self.T_W = set()
         self.T_I = set()
         self.T_O = set()
+        self.X_W = set()
+        self.Y_W = set()
+        self.P_W = set()
+        self.F_W = set()
+        self._direct_successions = set()
+        self._choices = set()
+        self._causals = set()
         self._petri_net = None
-                
+    
+    def omit_duplicate_traces(self):
+        hashset = set()
+        new_log = dict()
+
+        for case, events in self._log.items():
+            hashvalue = ""
+            for event in events:
+                hashvalue = hash((hashvalue, event.__hash__()))
+
+            if hashvalue in hashset:
+                continue
+
+            hashset.add(hashvalue)
+            new_log[case] = events
+
+        self._log = new_log
+    
+    def get_ordering_relations(self):
+        self._get_direct_successions()
+        self._get_choices()
+        self._get_causals()
+
     def init_transition_sets(self):
-        for tasks in self._log.values():
-            self.T_W.union(set([Transition.from_event(task) for task in tasks]))
-            self.T_I.union(Transition.from_event(tasks[0]))
-            self.T_O.union(Transition.from_event(tasks[-1]))
+        all_events = set()
+        initial_events = set()
+        end_events = set()
+        for events in self._log.values():
+            initial_events.add(events[0])
+            end_events.add(events[-1])
+            all_events = all_events.union(set(event for event in events))
+        
+        self.T_W = self.T_W.union(set([Transition.from_event(event) for event in all_events]))
+
+        for T in self.T_W:
+            for initial in initial_events:
+                if initial.get_task() == T.get_name():
+                    self.T_I.add(T)
+
+            for end in end_events:
+                if end.get_task() == T.get_name():
+                    self.T_O.add(T)
             
     def init_places(self):
         if len(self.T_W) <= 0:
             return
         
         T_W_subsets = self._get_all_nonempty_subsets(self.T_W)
-        A, B = T_W_subsets
+
+        for A in T_W_subsets:
+            for B in T_W_subsets:
+                if self._are_X_W_elements(A, B):
+                    self.X_W.add((A, B))
         
-    def direct_succesions(self):
-        pass
+        self.Y_W = self.X_W.copy()
+        for A, B in self.X_W:
+            for A_prime, B_prime in self.X_W:
+                if (A, B) != (A_prime, B_prime) and set(A).issubset(A_prime) and set(B).issubset(B_prime):
+                    self.Y_W.discard((A, B))
+
+        self.P_W.add(Place(0, 1, None, self.T_I))
+        i = 1
+        for A, B in self.Y_W:
+            self.P_W.add(Place(i, 0, A, B))
+            i+=1
+        self.P_W.add(Place(i, 0, self.T_O, None))
+
+    def init_flow_relations(self):
+        for place in self.P_W:
+            A = place.get_A()
+            B = place.get_B()
+
+            for transition in A:
+                self.F_W.add(Edge(transition.get_id(), place.get_id()))
+
+            for transition in B:
+                self.F_W.add(Edge(place.get_id(), transition.get_id()))
+
+    def build_petri_net(self):
+        self._petri_net = PetriNet(self.P_W, self.T_W, self.F_W)
     
-    def causality(self):
-        pass
-    
-    def paralell(self):
-        pass
-    
-    def choice(self):
-        pass
-            
-    def build_petrni_net(self):
-        pass
-    
-    def get_petrni_net(self):
+    def get_petri_net(self):
         return self._petri_net
 
     def _get_all_nonempty_subsets(self, iterable):
         s = list(iterable)
-        return list(chain.from_iterable(combinations(s, r) for r in range(len(s)+1)))
+        return list(chain.from_iterable(combinations(s, r) for r in range(1, len(s)+1)))
+
+    def _get_direct_successions(self):
+        for events in self._log.values():
+            prev_transition = None
+            for event in events:
+                transition = None
+                # Don't want to recreate transition so, we find it within the existing ones
+                for t in self.T_W:
+                    if t.get_name() == event.get_task():
+                        transition = t
+
+                if prev_transition is not None:
+                    self._direct_successions.add((prev_transition, transition))
+
+                prev_transition = transition
+
+    def _get_causals(self):
+        for succession in self._direct_successions:
+            if (succession[1], succession[0]) not in self._direct_successions:
+                self._causals.add(succession)
+
+    def _get_choices(self):
+        for outer_transition in self.T_W:
+            for inner_transition in self.T_W:
+                left_right_relation = (outer_transition, inner_transition)
+                right_left_relation = (inner_transition, outer_transition)
+
+                if left_right_relation in self._direct_successions or right_left_relation in self._direct_successions:
+                    continue
+                
+                self._choices.add(left_right_relation)
+
+    def _are_X_W_elements(self, A, B):
+        if len(A) <= 0:
+            return False
+
+        if len(B) <= 0:
+            return False
         
+        for a_1 in A:
+            for a_2 in A:
+                if (a_1, a_2) not in self._choices:
+                    return False
+            
+            for b in B:
+                if (a_1, b) not in self._causals:
+                    return False
+
+        for b_1 in B:
+            for b_2 in B:
+                if (b_1, b_2) not in self._choices:
+                    return False
+        
+        return True
 
 class PetriNet():
-    def __init__(self):
-        self._places = set()
-        self._transitions = set()
-        self._edges = set()
+    def __init__(self, places=None, transitions=None, edges=None):
+        self._places = set() if places is None else places
+        self._transitions = set() if transitions is None else transitions
+        self._edges = set() if edges is None else edges
 
     def add_place(self, name):
         self._places.add(Place(name))
@@ -131,9 +251,11 @@ class PetriNet():
         return None
 
 class Place():
-    def __init__(self, id, num_of_tokens=0):
+    def __init__(self, id, num_of_tokens=0, A=None, B=None):
         self._id = id
         self._num_of_tokens = num_of_tokens
+        self._A = set() if A is None else A
+        self._B = set() if B is None else B
 
     def get_id(self):
         return self._id
@@ -152,6 +274,12 @@ class Place():
             return
         
         self._num_of_tokens -= 1
+
+    def get_A(self):
+        return self._A
+    
+    def get_B(self):
+        return self._B
 
     def __hash__(self):
         return hash(self._id)
@@ -182,7 +310,7 @@ class Transition():
 
     def __eq__(self, other):
         if isinstance(other, Transition):
-            return self._id == other._id
+            return self._id == self._id
 
 class Edge():
     def __init__(self, left, right):
@@ -292,3 +420,10 @@ class Event:
             return self._cost
         else:
             return self._resources[0]
+
+    def __hash__(self):
+        return hash(self._name)
+
+    def __eq__(self, other):
+        if isinstance(other, Event):
+            return self._name == other._name

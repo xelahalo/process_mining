@@ -2,6 +2,8 @@ from alpha_miner import alpha, read_from_file
 
 mined_model = alpha(read_from_file("extension-log.xes"))
 
+
+
 def check_enabled(pn):
   ts = ["record issue", "inspection", "intervention authorization", "action not required", "work mandate", "no concession", "work completion", "issue completion"]
   for t in ts:
